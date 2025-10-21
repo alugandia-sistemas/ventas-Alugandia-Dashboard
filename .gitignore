@@ -1,0 +1,6 @@
+# Entorno virtual
+env
+.env
+
+# Datos
+data_bruto
