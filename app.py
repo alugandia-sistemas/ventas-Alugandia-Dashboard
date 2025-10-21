@@ -18,14 +18,14 @@ st.subheader("Análisis de ventas por cliente y año (2020-2025)")
 st.caption("Última actualización de datos: 21/10/2025")
 
 # Login / Proteccion con contraseña
-def login():
-    st.sidebar.subheader("🔐 Acceso privado")
-    password = st.sidebar.text_input("Contraseña:", type="password")
-    if password != st.secrets["APP_PASSWORD"]:
-        st.error("Contraseña incorrecta o falta.")
-        st.stop()
+# def login():
+#     st.sidebar.subheader("🔐 Acceso privado")
+#     password = st.sidebar.text_input("Contraseña:", type="password")
+#     if password != st.secrets["APP_PASSWORD"]:
+#         st.error("Contraseña incorrecta o falta.")
+#         st.stop()
 
-login()
+# login()
 
 # --- Configuración ---
 DATA_FOLDER = "data"  # Carpeta donde se guardan los CSVs
