@@ -238,97 +238,97 @@ with tab1:
 # ============================================================
 # 🔵 TAB 2 – COMPARATIVA ANUAL
 # ============================================================
-with tab2:
-    st.title("📈 Comparativa de Ventas entre Años")
-    st.markdown("Compara ventas totales o por cliente entre dos años distintos, con análisis por rango de facturación.")
+# with tab2:
+#     st.title("📈 Comparativa de Ventas entre Años")
+#     st.markdown("Compara ventas totales o por cliente entre dos años distintos, con análisis por rango de facturación.")
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        año_1 = st.selectbox("Año inicial", años, index=max(0, len(años) - 2))
-    with col_b:
-        año_2 = st.selectbox("Año comparado", años, index=len(años) - 1)
+#     col_a, col_b = st.columns(2)
+#     with col_a:
+#         año_1 = st.selectbox("Año inicial", años, index=max(0, len(años) - 2))
+#     with col_b:
+#         año_2 = st.selectbox("Año comparado", años, index=len(años) - 1)
 
-    modo_comparacion = st.radio("Modo de comparación", ["Totales", "Por cliente"], horizontal=True)
+#     modo_comparacion = st.radio("Modo de comparación", ["Totales", "Por cliente"], horizontal=True)
 
-    if modo_comparacion == "Totales":
-        ventas_totales = df.groupby("year")["net_sales"].sum().reset_index().sort_values("year")
+#     if modo_comparacion == "Totales":
+#         ventas_totales = df.groupby("year")["net_sales"].sum().reset_index().sort_values("year")
 
-        st.subheader("💰 Ventas Totales por Año")
-        st.bar_chart(ventas_totales, x="year", y="net_sales", use_container_width=True)
+#         st.subheader("💰 Ventas Totales por Año")
+#         st.bar_chart(ventas_totales, x="year", y="net_sales", use_container_width=True)
 
-        total_1 = ventas_totales.loc[ventas_totales["year"] == año_1, "net_sales"].sum()
-        total_2 = ventas_totales.loc[ventas_totales["year"] == año_2, "net_sales"].sum()
-        variacion = ((total_2 - total_1) / total_1 * 100) if total_1 else 0
+#         total_1 = ventas_totales.loc[ventas_totales["year"] == año_1, "net_sales"].sum()
+#         total_2 = ventas_totales.loc[ventas_totales["year"] == año_2, "net_sales"].sum()
+#         variacion = ((total_2 - total_1) / total_1 * 100) if total_1 else 0
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric(f"Ventas {año_1}", f"{total_1:,.2f} €")
-        with col2:
-            st.metric(f"Ventas {año_2}", f"{total_2:,.2f} €")
-        with col3:
-            st.metric("Variación", f"{variacion:+.1f} %")
+#         col1, col2, col3 = st.columns(3)
+#         with col1:
+#             st.metric(f"Ventas {año_1}", f"{total_1:,.2f} €")
+#         with col2:
+#             st.metric(f"Ventas {año_2}", f"{total_2:,.2f} €")
+#         with col3:
+#             st.metric("Variación", f"{variacion:+.1f} %")
 
-        # Evolución por rango
-        df_rangos = (
-            df.groupby(["year", "client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
-        )
-        df_rangos["rango_facturacion"] = df_rangos["net_sales"].apply(clasificar_rango)
-        resumen = (
-            df_rangos.groupby(["year", "rango_facturacion"], as_index=False)
-            .agg(total_ventas=("net_sales", "sum"))
-        )
+#         # Evolución por rango
+#         df_rangos = (
+#             df.groupby(["year", "client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
+#         )
+#         df_rangos["rango_facturacion"] = df_rangos["net_sales"].apply(clasificar_rango)
+#         resumen = (
+#             df_rangos.groupby(["year", "rango_facturacion"], as_index=False)
+#             .agg(total_ventas=("net_sales", "sum"))
+#         )
 
-        chart_rangos_comp = (
-            alt.Chart(resumen)
-            .mark_bar()
-            .encode(
-                x=alt.X("rango_facturacion:N", title="Rango"),
-                y=alt.Y("total_ventas:Q", title="Ventas (€)"),
-                color=alt.Color(
-                    "rango_facturacion:N",
-                    scale=alt.Scale(
-                        domain=list(COLOR_RANGOS.keys()),
-                        range=list(COLOR_RANGOS.values())
-                    )
-                ),
-                column="year:N",
-                tooltip=["year", "rango_facturacion", "total_ventas"]
-            )
-            .properties(height=300)
-        )
-        st.subheader("📦 Evolución por rango de facturación")
-        st.altair_chart(chart_rangos_comp, use_container_width=True)
+#         chart_rangos_comp = (
+#             alt.Chart(resumen)
+#             .mark_bar()
+#             .encode(
+#                 x=alt.X("rango_facturacion:N", title="Rango"),
+#                 y=alt.Y("total_ventas:Q", title="Ventas (€)"),
+#                 color=alt.Color(
+#                     "rango_facturacion:N",
+#                     scale=alt.Scale(
+#                         domain=list(COLOR_RANGOS.keys()),
+#                         range=list(COLOR_RANGOS.values())
+#                     )
+#                 ),
+#                 column="year:N",
+#                 tooltip=["year", "rango_facturacion", "total_ventas"]
+#             )
+#             .properties(height=300)
+#         )
+#         st.subheader("📦 Evolución por rango de facturación")
+#         st.altair_chart(chart_rangos_comp, use_container_width=True)
 
-    else:
-        df_1 = df[df["year"] == año_1].groupby(["client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
-        df_2 = df[df["year"] == año_2].groupby(["client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
+#     else:
+#         df_1 = df[df["year"] == año_1].groupby(["client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
+#         df_2 = df[df["year"] == año_2].groupby(["client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
 
-        comparativa = pd.merge(
-            df_1, df_2, on=["client_code_norm", "client_name"], how="outer",
-            suffixes=(f"_{año_1}", f"_{año_2}")
-        ).fillna(0)
+#         comparativa = pd.merge(
+#             df_1, df_2, on=["client_code_norm", "client_name"], how="outer",
+#             suffixes=(f"_{año_1}", f"_{año_2}")
+#         ).fillna(0)
 
-        comparativa["diferencia"] = comparativa[f"net_sales_{año_2}"] - comparativa[f"net_sales_{año_1}"]
-        comparativa["variacion_%"] = comparativa["diferencia"] / comparativa[f"net_sales_{año_1}"].replace(0, pd.NA) * 100
-        comparativa["rango_facturacion"] = comparativa[
-            [f"net_sales_{año_1}", f"net_sales_{año_2}"]
-        ].mean(axis=1).apply(clasificar_rango)
+#         comparativa["diferencia"] = comparativa[f"net_sales_{año_2}"] - comparativa[f"net_sales_{año_1}"]
+#         comparativa["variacion_%"] = comparativa["diferencia"] / comparativa[f"net_sales_{año_1}"].replace(0, pd.NA) * 100
+#         comparativa["rango_facturacion"] = comparativa[
+#             [f"net_sales_{año_1}", f"net_sales_{año_2}"]
+#         ].mean(axis=1).apply(clasificar_rango)
 
-        st.subheader(f"📊 Comparativa por Cliente: {año_1} vs {año_2}")
-        # formatear las columnas de dinero y porcentaje antes de mostrar
-        fmt_cols = {
-            f"net_sales_{año_1}": lambda x: f"{x:,.2f} €",
-            f"net_sales_{año_2}": lambda x: f"{x:,.2f} €",
-            "diferencia": lambda x: f"{x:,.2f} €",
-            "variacion_%": lambda x: f"{x:.1f} %"
-        }
-        styled_comparativa = comparativa.sort_values("diferencia", ascending=False).style.format(fmt_cols)
-        st.dataframe(styled_comparativa, use_container_width=True, hide_index=True)
+#         st.subheader(f"📊 Comparativa por Cliente: {año_1} vs {año_2}")
+#         # formatear las columnas de dinero y porcentaje antes de mostrar
+#         fmt_cols = {
+#             f"net_sales_{año_1}": lambda x: f"{x:,.2f} €",
+#             f"net_sales_{año_2}": lambda x: f"{x:,.2f} €",
+#             "diferencia": lambda x: f"{x:,.2f} €",
+#             "variacion_%": lambda x: f"{x:.1f} %"
+#         }
+#         styled_comparativa = comparativa.sort_values("diferencia", ascending=False).style.format(fmt_cols)
+#         st.dataframe(styled_comparativa, use_container_width=True, hide_index=True)
 
-        st.subheader("🔝 Principales Incrementos")
-        top_inc = comparativa.sort_values("diferencia", ascending=False).head(15)
-        st.bar_chart(top_inc, x="client_code_norm", y="diferencia", use_container_width=True)
+#         st.subheader("🔝 Principales Incrementos")
+#         top_inc = comparativa.sort_values("diferencia", ascending=False).head(15)
+#         st.bar_chart(top_inc, x="client_code_norm", y="diferencia", use_container_width=True)
 
-        st.subheader("🔻 Principales Descensos")
-        top_dec = comparativa.sort_values("diferencia", ascending=True).head(15)
-        st.bar_chart(top_dec, x="client_code_norm", y="diferencia", use_container_width=True)
+#         st.subheader("🔻 Principales Descensos")
+#         top_dec = comparativa.sort_values("diferencia", ascending=True).head(15)
+#         st.bar_chart(top_dec, x="client_code_norm", y="diferencia", use_container_width=True)
