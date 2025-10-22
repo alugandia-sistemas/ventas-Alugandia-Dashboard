@@ -1,145 +1,306 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import re
 import os
+import pandas as pd
+import streamlit as st
+import altair as alt
 from supabase import create_client, Client
 from dotenv import load_dotenv
+import logging
 
+# -------------------------------
+# CONFIGURACIÓN INICIAL
+# -------------------------------
+st.set_page_config(page_title="Ventas Alugandia", layout="wide")
+
+# Cargar variables de entorno
 load_dotenv()
-url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(url, key)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-st.set_page_config(page_title="Alugandia · Ventas multi-año", layout="wide")
-st.title("📊 Alugandia · Dashboard de Ventas")
-st.subheader("Análisis de ventas por cliente y año (2020-2025)")
-# st.caption("Carga automática de CSVs por año con columnas: client_code, client_name, net_sales, client_code_norm.")
-st.caption("Última actualización de datos: 21/10/2025")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Login / Proteccion con contraseña
-# def login():
-#     st.sidebar.subheader("🔐 Acceso privado")
-#     password = st.sidebar.text_input("Contraseña:", type="password")
-#     if password != st.secrets["APP_PASSWORD"]:
-#         st.error("Contraseña incorrecta o falta.")
-#         st.stop()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# login()
-
-# --- Configuración ---
-DATA_FOLDER = "data"  # Carpeta donde se guardan los CSVs
-
-# --- Funciones auxiliares ---
-def label_segment(amount: float) -> str:
-    if amount > 15000:
-        return "🟢 >15K"
-    elif amount >= 10000:
-        return "🟡 10K–15K"
-    else:
-        return "🔴 <10K"
-
-# --- Cargar todos los CSVs ---
+# -------------------------------
+# FUNCIONES AUXILIARES
+# -------------------------------
 @st.cache_data
-def load_all_csvs(path: str):
-    frames = []
-    if not os.path.exists(path):
-        st.warning(f"No se encontró la carpeta '{path}'. Crea una carpeta con tus CSVs dentro del proyecto.")
-        return pd.DataFrame()
-    for fname in os.listdir(path):
-        if fname.lower().endswith(".csv"):
-            year_match = re.search(r"(\d{4})", fname)
-            if not year_match:
-                continue
-            year = int(year_match.group(1))
-            df = pd.read_csv(os.path.join(path, fname))
-            if not {"client_code","client_name","net_sales","client_code_norm"}.issubset(df.columns):
-                st.warning(f"⚠️ El archivo {fname} no tiene todas las columnas requeridas.")
-                continue
-            df["year"] = year
-            frames.append(df)
-    if not frames:
-        st.warning("No se encontraron archivos CSV válidos (por ejemplo: ventas_2024.csv, ventas_2025.csv).")
-        return pd.DataFrame()
-    df_all = pd.concat(frames, ignore_index=True)
-    # Excluir Soleco Traders
-    df_all = df_all[df_all["client_code_norm"] != 12334]
-    df_all["segment"] = df_all["net_sales"].apply(label_segment)
-    return df_all
+def cargar_datos():
+    """Carga todos los registros de ventas desde Supabase."""
+    try:
+        response = supabase.table("ventas").select("*").execute()
+        
+        if not response or not response.data:
+            logger.warning("No data received from Supabase")
+            return pd.DataFrame(columns=["client_code", "client_name", "client_code_norm", "net_sales", "year"])
+        
+        logger.info(f"Retrieved {len(response.data)} records from Supabase")
+        
+        df = pd.DataFrame(response.data)
+        
+        # Validate required columns
+        required_columns = ["client_code", "client_name", "client_code_norm", "net_sales", "year"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"Missing required columns: {missing_columns}")
+            st.error(f"Data structure error: Missing columns {missing_columns}")
+            return pd.DataFrame(columns=required_columns)
+        
+        # Validate data types and clean
+        df["net_sales"] = pd.to_numeric(df["net_sales"], errors='coerce')
+        invalid_sales = df["net_sales"].isna().sum()
+        if invalid_sales:
+            logger.warning(f"Found {invalid_sales} records with invalid net_sales values")
+            st.warning(f"Found {invalid_sales} records with invalid sales values")
+        
+        df["year"] = pd.to_numeric(df["year"], errors='coerce')
+        invalid_years = df["year"].isna().sum()
+        if invalid_years:
+            logger.warning(f"Found {invalid_years} records with invalid year values")
+            st.warning(f"Found {invalid_years} records with invalid year values")
+        
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error loading data from Supabase: {str(e)}")
+        st.error(f"Error loading data: {str(e)}")
+        return pd.DataFrame(columns=["client_code", "client_name", "client_code_norm", "net_sales", "year"])
 
-# --- Cargar datos ---
-df_all = load_all_csvs(DATA_FOLDER)
-if df_all.empty:
+def filtrar_datos(df, year, excluir_clientes, rangos_seleccionados):
+    """Filtra los datos por año, exclusión de clientes y rango."""
+    filtrado = df[df["year"] == year].copy()
+    if excluir_clientes:
+        excluir_clientes = [x.strip().lower() for x in excluir_clientes.split(",") if x.strip()]
+        filtrado = filtrado[~filtrado["client_name"].str.lower().isin(excluir_clientes)]
+    if rangos_seleccionados and len(rangos_seleccionados) < 3:
+        filtrado = filtrado[filtrado["rango_facturacion"].isin(rangos_seleccionados)]
+    return filtrado
+
+def clasificar_rango(ventas):
+    """Clasifica el cliente según su rango de facturación."""
+    if ventas < 10000:
+        return "Pequeño (<10k)"
+    elif ventas < 20000:
+        return "Mediano (10k–20k)"
+    else:
+        return "Grande (>20k)"
+
+# Mapeo de colores
+COLOR_RANGOS = {
+    "Pequeño (<10k)": "#56B4E9",
+    "Mediano (10k–20k)": "#E69F00",
+    "Grande (>20k)": "#009E73"
+}
+
+# -------------------------------
+# CARGA DE DATOS
+# -------------------------------
+with st.spinner("Cargando datos desde Supabase..."):
+    df = cargar_datos()
+
+if df.empty:
+    st.warning("No se encontraron datos en la base de datos 'ventas'.")
     st.stop()
 
-# --- Filtros ---
-st.sidebar.header("🔎 Filtros")
-years = sorted(df_all["year"].unique())
-year = st.sidebar.selectbox("Año", years, index=len(years)-1)
-seg_sel = st.sidebar.selectbox("Segmento", ["Todos", "🟢 >15K", "🟡 10K–15K", "🔴 <10K"], index=0)
-show_names = st.sidebar.checkbox("Mostrar nombres de clientes", value=False)
+df["rango_facturacion"] = df["net_sales"].apply(clasificar_rango)
+años = sorted(df["year"].unique())
 
-df_year = df_all[df_all["year"] == year].copy()
-if seg_sel != "Todos":
-    df_year = df_year[df_year["segment"] == seg_sel]
+# -------------------------------
+# INTERFAZ DE PESTAÑAS
+# -------------------------------
+tab1, tab2 = st.tabs(["📊 Ventas por año", "📈 Comparativa anual"])
 
-# --- Filtro de exclusión ---
-st.sidebar.subheader("🚫 Excluir clientes")
-exclude_options = sorted(df_year["client_name"].unique())
-exclude_selected = st.sidebar.multiselect(
-    "Selecciona clientes a excluir del análisis:",
-    options=exclude_options,
-    default=[]
-)
-if exclude_selected:
-    df_year = df_year[~df_year["client_name"].isin(exclude_selected)]
+# ============================================================
+# 🟢 TAB 1 – VENTAS POR AÑO
+# ============================================================
+with tab1:
+    st.title("📊 Ventas Alugandia Dashboard")
+    st.markdown("Visualización de ventas por cliente, año y rango de facturación. Datos cargados desde Supabase.")
 
-# --- Métricas ---
-total_sales = df_year["net_sales"].sum()
-n_clients = df_year["client_code_norm"].nunique()
+    st.sidebar.header("Filtros (Ventas por año)")
+    año_seleccionado = st.sidebar.selectbox("Seleccionar año", años, index=len(años)-1)
+    excluir_clientes = st.sidebar.text_input("Excluir clientes (separar por coma)", "")
+    mostrar_nombres = st.sidebar.checkbox("Mostrar nombres de clientes", value=False)
 
-c1, c2 = st.columns(2)
-c1.metric("Ventas totales", f"{total_sales:,.2f} €".replace(",", "X").replace(".", ",").replace("X", "."))
-c2.metric("Nº de clientes", f"{n_clients}")
+    rangos_unicos = list(COLOR_RANGOS.keys())
+    rangos_seleccionados = st.sidebar.multiselect(
+        "Rangos de facturación a mostrar",
+        rangos_unicos,
+        default=rangos_unicos
+    )
 
-# --- Gráficos ---
-colA, colB = st.columns([1,2])
+    # Filtrado
+    df_filtrado = df.copy()
+    df_filtrado = filtrar_datos(df_filtrado, año_seleccionado, excluir_clientes, rangos_seleccionados)
 
-with colA:
-    seg_summary = df_year.groupby("segment", as_index=False)["net_sales"].sum()
-    fig_pie = px.pie(seg_summary, names="segment", values="net_sales", hole=0.55,
-                     title=f"Distribución por segmento ({year})")
-    st.plotly_chart(fig_pie, use_container_width=True)
+    ventas_por_cliente = (
+        df_filtrado.groupby(["client_code_norm", "client_name", "rango_facturacion"], as_index=False)["net_sales"]
+        .sum()
+        .sort_values(by="net_sales", ascending=False)
+    )
 
-with colB:
-    top_df = df_year.sort_values("net_sales", ascending=False).head(20)
-    if show_names:
-        top_df["label"] = top_df["client_name"] + " (" + top_df["client_code_norm"].astype(str) + ")"
+    # -------------------------------
+    # MÉTRICAS GENERALES
+    # -------------------------------
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("💰 Ventas totales", f"{ventas_por_cliente['net_sales'].sum():,.0f} €")
+    with col2:
+        st.metric("👥 Nº de clientes", f"{ventas_por_cliente.shape[0]}")
+    with col3:
+        st.metric("🗂️ Rangos visibles", f"{len(rangos_seleccionados)}")
+
+    st.divider()
+
+    # -------------------------------
+    # DISTRIBUCIÓN POR RANGO
+    # -------------------------------
+    st.subheader("📦 Distribución por rango de facturación")
+
+    resumen_rangos = (
+        ventas_por_cliente.groupby("rango_facturacion", as_index=False)
+        .agg(clientes=("client_code_norm", "count"), total_ventas=("net_sales", "sum"))
+        .sort_values("total_ventas", ascending=False)
+    )
+
+    # Gráfico Altair con colores personalizados
+    chart_rangos = (
+        alt.Chart(resumen_rangos)
+        .mark_bar()
+        .encode(
+            x=alt.X("rango_facturacion:N", title="Rango de facturación"),
+            y=alt.Y("total_ventas:Q", title="Ventas (€)"),
+            color=alt.Color("rango_facturacion:N", scale=alt.Scale(domain=list(COLOR_RANGOS.keys()), range=list(COLOR_RANGOS.values()))),
+            tooltip=["rango_facturacion", "total_ventas", "clientes"]
+        )
+        .properties(height=300)
+    )
+
+    colA, colB = st.columns(2)
+    with colA:
+        st.dataframe(resumen_rangos, hide_index=True, use_container_width=True)
+    with colB:
+        st.altair_chart(chart_rangos, use_container_width=True)
+
+    st.divider()
+
+    # -------------------------------
+    # LISTADO DE CLIENTES
+    # -------------------------------
+    st.subheader(f"📋 Clientes {año_seleccionado}")
+
+    columnas = ["client_code_norm", "net_sales", "rango_facturacion"]
+    if mostrar_nombres:
+        columnas.insert(1, "client_name")
+
+    st.dataframe(
+        ventas_por_cliente[columnas],
+        hide_index=True,
+        use_container_width=True
+    )
+
+    # -------------------------------
+    # TOP CLIENTES
+    # -------------------------------
+    st.subheader("📈 Ventas por cliente (Top N)")
+    top_n = st.slider("Mostrar top N clientes", min_value=5, max_value=50, value=20)
+    df_top = ventas_por_cliente.head(top_n)
+
+    chart_top = (
+        alt.Chart(df_top)
+        .mark_bar()
+        .encode(
+            x=alt.X("client_code_norm:N", title="Cliente"),
+            y=alt.Y("net_sales:Q", title="Ventas (€)"),
+            color=alt.Color("rango_facturacion:N", scale=alt.Scale(domain=list(COLOR_RANGOS.keys()), range=list(COLOR_RANGOS.values()))),
+            tooltip=["client_code_norm", "client_name", "net_sales", "rango_facturacion"]
+        )
+        .properties(height=400)
+    )
+    st.altair_chart(chart_top, use_container_width=True)
+
+# ============================================================
+# 🔵 TAB 2 – COMPARATIVA ANUAL
+# ============================================================
+with tab2:
+    st.title("📈 Comparativa de Ventas entre Años")
+    st.markdown("Compara ventas totales o por cliente entre dos años distintos, con análisis por rango de facturación.")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        año_1 = st.selectbox("Año inicial", años, index=len(años)-2 if len(años) > 1 else 0)
+    with col_b:
+        año_2 = st.selectbox("Año comparado", años, index=len(años)-1)
+
+    modo_comparacion = st.radio("Modo de comparación", ["Totales", "Por cliente"], horizontal=True)
+
+    if modo_comparacion == "Totales":
+        # Ventas totales por año
+        ventas_totales = (
+            df.groupby("year")["net_sales"].sum().reset_index().sort_values("year")
+        )
+
+        st.subheader("💰 Ventas Totales por Año")
+        st.bar_chart(ventas_totales, x="year", y="net_sales", use_container_width=True)
+
+        total_1 = ventas_totales.loc[ventas_totales["year"] == año_1, "net_sales"].sum()
+        total_2 = ventas_totales.loc[ventas_totales["year"] == año_2, "net_sales"].sum()
+        variacion = ((total_2 - total_1) / total_1 * 100) if total_1 else 0
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(f"Ventas {año_1}", f"{total_1:,.0f} €")
+        with col2:
+            st.metric(f"Ventas {año_2}", f"{total_2:,.0f} €")
+        with col3:
+            st.metric("Variación", f"{variacion:+.1f} %")
+
+        # Evolución por rango
+        df_rangos = (
+            df.groupby(["year", "client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
+        )
+        df_rangos["rango_facturacion"] = df_rangos["net_sales"].apply(clasificar_rango)
+        resumen = (
+            df_rangos.groupby(["year", "rango_facturacion"], as_index=False)
+            .agg(total_ventas=("net_sales", "sum"))
+        )
+
+        chart_rangos_comp = (
+            alt.Chart(resumen)
+            .mark_bar()
+            .encode(
+                x=alt.X("rango_facturacion:N", title="Rango"),
+                y=alt.Y("total_ventas:Q", title="Ventas (€)"),
+                color=alt.Color("rango_facturacion:N", scale=alt.Scale(domain=list(COLOR_RANGOS.keys()), range=list(COLOR_RANGOS.values()))),
+                column="year:N",
+                tooltip=["year", "rango_facturacion", "total_ventas"]
+            )
+            .properties(height=300)
+        )
+        st.subheader("📦 Evolución por rango de facturación")
+        st.altair_chart(chart_rangos_comp, use_container_width=True)
+
     else:
-        top_df["label"] = top_df["client_code_norm"].astype(str)
-    fig_bar = px.bar(top_df, x="net_sales", y="label", orientation="h",
-                     title=f"Top 20 clientes · {year}", text="net_sales")
-    fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Facturación (€)", yaxis_title="Cliente")
-    st.plotly_chart(fig_bar, use_container_width=True)
+        # Comparación por cliente
+        df_1 = df[df["year"] == año_1].groupby(["client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
+        df_2 = df[df["year"] == año_2].groupby(["client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
 
-# --- Evolución anual ---
-st.subheader("📈 Evolución anual de ventas totales")
-year_summary = df_all.groupby("year", as_index=False)["net_sales"].sum()
-fig_year = px.line(year_summary, x="year", y="net_sales", markers=True, title="Evolución anual de ventas")
-st.plotly_chart(fig_year, use_container_width=True)
+        comparativa = pd.merge(df_1, df_2, on=["client_code_norm", "client_name"], how="outer", suffixes=(f"_{año_1}", f"_{año_2}")).fillna(0)
+        comparativa["diferencia"] = comparativa[f"net_sales_{año_2}"] - comparativa[f"net_sales_{año_1}"]
+        comparativa["variacion_%"] = comparativa["diferencia"] / comparativa[f"net_sales_{año_1}"].replace(0, pd.NA) * 100
+        comparativa["rango_facturacion"] = comparativa[[f"net_sales_{año_1}", f"net_sales_{año_2}"]].mean(axis=1).apply(clasificar_rango)
 
-# --- Tabla ---
-st.subheader(f"📋 Clientes {year}")
-cols = ["client_code", "client_code_norm", "net_sales", "segment"]
-rename_map = {
-    "client_code": "Código original",
-    "client_code_norm": "Código normalizado",
-    "net_sales": "Facturación (€)",
-    "segment": "Segmento"
-}
-if show_names:
-    cols.insert(1, "client_name")
-    rename_map["client_name"] = "Cliente"
+        st.subheader(f"📊 Comparativa por Cliente: {año_1} vs {año_2}")
+        st.dataframe(
+            comparativa.sort_values("diferencia", ascending=False),
+            use_container_width=True,
+            hide_index=True
+        )
 
-df_table = df_year[cols].rename(columns=rename_map)
-st.dataframe(df_table, use_container_width=True)
+        st.subheader("🔝 Principales Incrementos")
+        top_inc = comparativa.sort_values("diferencia", ascending=False).head(15)
+        st.bar_chart(top_inc, x="client_code_norm", y="diferencia", use_container_width=True)
+
+        st.subheader("🔻 Principales Descensos")
+        top_dec = comparativa.sort_values("diferencia", ascending=True).head(15)
+        st.bar_chart(top_dec, x="client_code_norm", y="diferencia", use_container_width=True)
