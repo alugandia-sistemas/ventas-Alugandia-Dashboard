@@ -47,15 +47,6 @@ def cargar_datos():
     df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
     return df
 
-def filtrar_datos(df, year, excluir_clientes, rangos_seleccionados):
-    """Filtra los datos por año, exclusión de clientes y rango."""
-    filtrado = df[df["year"] == year].copy()
-    if excluir_clientes:
-        excluir_clientes = [x.strip().lower() for x in excluir_clientes.split(",") if x.strip()]
-        filtrado = filtrado[~filtrado["client_name"].str.lower().isin(excluir_clientes)]
-    if rangos_seleccionados and len(rangos_seleccionados) < 3:
-        filtrado = filtrado[filtrado["rango_facturacion"].isin(rangos_seleccionados)]
-    return filtrado
 
 def clasificar_rango(ventas):
     """Clasifica el cliente según su rango de facturación."""
@@ -66,7 +57,37 @@ def clasificar_rango(ventas):
     else:
         return "Grande (>20k)"
 
-# Mapeo de colores
+
+def filtrar_datos(df, year, clientes_excluir, rangos_seleccionados):
+    """Filtra por año, exclusión de clientes y rangos."""
+    filtrado = df[df["year"] == year].copy()
+
+    if clientes_excluir:
+        clientes_excluir_lower = [c.lower() for c in clientes_excluir]
+        filtrado = filtrado[~filtrado["client_name"].str.lower().isin(clientes_excluir_lower)]
+
+    if rangos_seleccionados and len(rangos_seleccionados) < 3:
+        filtrado = filtrado[filtrado["rango_facturacion"].isin(rangos_seleccionados)]
+
+    return filtrado
+
+
+def aplicar_estilo(df, color_map):
+    """Devuelve un pandas Styler con colores según el rango y formateo de moneda."""
+    def color_rango(val):
+        color = color_map.get(val, "")
+        return f"background-color: {color}; color: white; font-weight: bold; text-align: center;"
+
+    return (
+        df.style
+        .format({"net_sales": lambda x: f"{x:,.2f} €"})
+        .map(lambda v: color_rango(v), subset=["rango_facturacion"])
+    )
+
+
+# -------------------------------
+# CONFIGURACIÓN DE COLORES
+# -------------------------------
 COLOR_RANGOS = {
     "Pequeño (<10k)": "#56B4E9",
     "Mediano (10k–20k)": "#E69F00",
@@ -83,14 +104,9 @@ if df.empty:
     st.warning("No se encontraron datos en la base de datos 'ventas'.")
     st.stop()
 
-# Clasificar y asegurar tipos
+# Clasificación de rangos
 df["rango_facturacion"] = df["net_sales"].apply(clasificar_rango)
 años = sorted(df["year"].dropna().unique())
-
-# Debug temporal para verificar años cargados
-# st.sidebar.markdown("### 🧭 Diagnóstico")
-# st.sidebar.write("**Años detectados:**", list(años))
-# st.sidebar.write("**Total registros:**", len(df))
 
 # -------------------------------
 # INTERFAZ DE PESTAÑAS
@@ -105,9 +121,11 @@ with tab1:
     st.markdown("Visualización de ventas por cliente, año y rango de facturación. Datos cargados desde Supabase.")
 
     st.sidebar.header("Filtros (Ventas por año)")
-    año_seleccionado = st.sidebar.selectbox("Seleccionar año", años, index=len(años)-1)
-    excluir_clientes = st.sidebar.text_input("Excluir clientes (separar por coma)", "")
-    mostrar_nombres = st.sidebar.checkbox("Mostrar nombres de clientes", value=False)
+    año_seleccionado = st.sidebar.selectbox("Seleccionar año", años, index=len(años) - 1)
+
+    # Selector múltiple de clientes
+    clientes_disponibles = sorted(df["client_name"].dropna().unique())
+    clientes_excluir = st.sidebar.multiselect("Excluir clientes", options=clientes_disponibles, default=[])
 
     rangos_unicos = list(COLOR_RANGOS.keys())
     rangos_seleccionados = st.sidebar.multiselect(
@@ -116,8 +134,10 @@ with tab1:
         default=rangos_unicos
     )
 
-    # Filtrado
-    df_filtrado = filtrar_datos(df, año_seleccionado, excluir_clientes, rangos_seleccionados)
+    mostrar_nombres = st.sidebar.checkbox("Mostrar nombres de clientes", value=True)
+
+    # Aplicar filtros
+    df_filtrado = filtrar_datos(df, año_seleccionado, clientes_excluir, rangos_seleccionados)
 
     ventas_por_cliente = (
         df_filtrado.groupby(["client_code_norm", "client_name", "rango_facturacion"], as_index=False)["net_sales"]
@@ -130,7 +150,7 @@ with tab1:
     # -------------------------------
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("💰 Ventas totales", f"{ventas_por_cliente['net_sales'].sum():,.0f} €")
+        st.metric("💰 Ventas totales", f"{ventas_por_cliente['net_sales'].sum():,.2f} €")
     with col2:
         st.metric("👥 Nº de clientes", f"{ventas_por_cliente.shape[0]}")
     with col3:
@@ -155,7 +175,13 @@ with tab1:
         .encode(
             x=alt.X("rango_facturacion:N", title="Rango de facturación"),
             y=alt.Y("total_ventas:Q", title="Ventas (€)"),
-            color=alt.Color("rango_facturacion:N", scale=alt.Scale(domain=list(COLOR_RANGOS.keys()), range=list(COLOR_RANGOS.values()))),
+            color=alt.Color(
+                "rango_facturacion:N",
+                scale=alt.Scale(
+                    domain=list(COLOR_RANGOS.keys()),
+                    range=list(COLOR_RANGOS.values())
+                )
+            ),
             tooltip=["rango_facturacion", "total_ventas", "clientes"]
         )
         .properties(height=300)
@@ -163,14 +189,16 @@ with tab1:
 
     colA, colB = st.columns(2)
     with colA:
-        st.dataframe(resumen_rangos, hide_index=True, use_container_width=True)
+        # mostrar total_ventas formateado como moneda
+        styled_resumen = resumen_rangos.style.format({"total_ventas": lambda x: f"{x:,.2f} €"})
+        st.dataframe(styled_resumen, hide_index=True, use_container_width=True)
     with colB:
         st.altair_chart(chart_rangos, use_container_width=True)
 
     st.divider()
 
     # -------------------------------
-    # LISTADO DE CLIENTES
+    # TABLA DE CLIENTES
     # -------------------------------
     st.subheader(f"📋 Clientes {año_seleccionado}")
 
@@ -178,14 +206,11 @@ with tab1:
     if mostrar_nombres:
         columnas.insert(1, "client_name")
 
-    st.dataframe(
-        ventas_por_cliente[columnas],
-        hide_index=True,
-        use_container_width=True
-    )
+    styled_df = aplicar_estilo(ventas_por_cliente[columnas], COLOR_RANGOS)
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
     # -------------------------------
-    # TOP CLIENTES
+    # GRÁFICO DE CLIENTES TOP
     # -------------------------------
     st.subheader("📈 Ventas por cliente (Top N)")
     top_n = st.slider("Mostrar top N clientes", min_value=5, max_value=50, value=20)
@@ -197,7 +222,13 @@ with tab1:
         .encode(
             x=alt.X("client_code_norm:N", title="Cliente"),
             y=alt.Y("net_sales:Q", title="Ventas (€)"),
-            color=alt.Color("rango_facturacion:N", scale=alt.Scale(domain=list(COLOR_RANGOS.keys()), range=list(COLOR_RANGOS.values()))),
+            color=alt.Color(
+                "rango_facturacion:N",
+                scale=alt.Scale(
+                    domain=list(COLOR_RANGOS.keys()),
+                    range=list(COLOR_RANGOS.values())
+                )
+            ),
             tooltip=["client_code_norm", "client_name", "net_sales", "rango_facturacion"]
         )
         .properties(height=400)
@@ -213,9 +244,9 @@ with tab2:
 
     col_a, col_b = st.columns(2)
     with col_a:
-        año_1 = st.selectbox("Año inicial", años, index=max(0, len(años)-2))
+        año_1 = st.selectbox("Año inicial", años, index=max(0, len(años) - 2))
     with col_b:
-        año_2 = st.selectbox("Año comparado", años, index=len(años)-1)
+        año_2 = st.selectbox("Año comparado", años, index=len(años) - 1)
 
     modo_comparacion = st.radio("Modo de comparación", ["Totales", "Por cliente"], horizontal=True)
 
@@ -231,9 +262,9 @@ with tab2:
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric(f"Ventas {año_1}", f"{total_1:,.0f} €")
+            st.metric(f"Ventas {año_1}", f"{total_1:,.2f} €")
         with col2:
-            st.metric(f"Ventas {año_2}", f"{total_2:,.0f} €")
+            st.metric(f"Ventas {año_2}", f"{total_2:,.2f} €")
         with col3:
             st.metric("Variación", f"{variacion:+.1f} %")
 
@@ -253,7 +284,13 @@ with tab2:
             .encode(
                 x=alt.X("rango_facturacion:N", title="Rango"),
                 y=alt.Y("total_ventas:Q", title="Ventas (€)"),
-                color=alt.Color("rango_facturacion:N", scale=alt.Scale(domain=list(COLOR_RANGOS.keys()), range=list(COLOR_RANGOS.values()))),
+                color=alt.Color(
+                    "rango_facturacion:N",
+                    scale=alt.Scale(
+                        domain=list(COLOR_RANGOS.keys()),
+                        range=list(COLOR_RANGOS.values())
+                    )
+                ),
                 column="year:N",
                 tooltip=["year", "rango_facturacion", "total_ventas"]
             )
@@ -266,17 +303,27 @@ with tab2:
         df_1 = df[df["year"] == año_1].groupby(["client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
         df_2 = df[df["year"] == año_2].groupby(["client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
 
-        comparativa = pd.merge(df_1, df_2, on=["client_code_norm", "client_name"], how="outer", suffixes=(f"_{año_1}", f"_{año_2}")).fillna(0)
+        comparativa = pd.merge(
+            df_1, df_2, on=["client_code_norm", "client_name"], how="outer",
+            suffixes=(f"_{año_1}", f"_{año_2}")
+        ).fillna(0)
+
         comparativa["diferencia"] = comparativa[f"net_sales_{año_2}"] - comparativa[f"net_sales_{año_1}"]
         comparativa["variacion_%"] = comparativa["diferencia"] / comparativa[f"net_sales_{año_1}"].replace(0, pd.NA) * 100
-        comparativa["rango_facturacion"] = comparativa[[f"net_sales_{año_1}", f"net_sales_{año_2}"]].mean(axis=1).apply(clasificar_rango)
+        comparativa["rango_facturacion"] = comparativa[
+            [f"net_sales_{año_1}", f"net_sales_{año_2}"]
+        ].mean(axis=1).apply(clasificar_rango)
 
         st.subheader(f"📊 Comparativa por Cliente: {año_1} vs {año_2}")
-        st.dataframe(
-            comparativa.sort_values("diferencia", ascending=False),
-            use_container_width=True,
-            hide_index=True
-        )
+        # formatear las columnas de dinero y porcentaje antes de mostrar
+        fmt_cols = {
+            f"net_sales_{año_1}": lambda x: f"{x:,.2f} €",
+            f"net_sales_{año_2}": lambda x: f"{x:,.2f} €",
+            "diferencia": lambda x: f"{x:,.2f} €",
+            "variacion_%": lambda x: f"{x:.1f} %"
+        }
+        styled_comparativa = comparativa.sort_values("diferencia", ascending=False).style.format(fmt_cols)
+        st.dataframe(styled_comparativa, use_container_width=True, hide_index=True)
 
         st.subheader("🔝 Principales Incrementos")
         top_inc = comparativa.sort_values("diferencia", ascending=False).head(15)
