@@ -20,7 +20,6 @@ def login(email: str, password: str):
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         user = res.user
         approved = get_user_approval(email)
-        # approved = True
         if not approved:
             st.warning("⏳ Tu cuenta aún no ha sido aprobada por el administrador.")
             supabase.auth.sign_out()

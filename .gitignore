@@ -2,5 +2,7 @@
 env
 .env
 
+temp
+
 # Datos
 data
