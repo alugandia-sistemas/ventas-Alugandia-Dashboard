@@ -4,7 +4,6 @@ import streamlit as st
 import altair as alt
 from supabase import create_client, Client
 from dotenv import load_dotenv
-import logging
 
 # -------------------------------
 # CONFIGURACIÓN INICIAL
@@ -18,53 +17,35 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # -------------------------------
 # FUNCIONES AUXILIARES
 # -------------------------------
 @st.cache_data
 def cargar_datos():
-    """Carga todos los registros de ventas desde Supabase."""
-    try:
-        response = supabase.table("ventas").select("*").execute()
-        
-        if not response or not response.data:
-            logger.warning("No data received from Supabase")
-            return pd.DataFrame(columns=["client_code", "client_name", "client_code_norm", "net_sales", "year"])
-        
-        logger.info(f"Retrieved {len(response.data)} records from Supabase")
-        
-        df = pd.DataFrame(response.data)
-        
-        # Validate required columns
-        required_columns = ["client_code", "client_name", "client_code_norm", "net_sales", "year"]
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            logger.error(f"Missing required columns: {missing_columns}")
-            st.error(f"Data structure error: Missing columns {missing_columns}")
-            return pd.DataFrame(columns=required_columns)
-        
-        # Validate data types and clean
-        df["net_sales"] = pd.to_numeric(df["net_sales"], errors='coerce')
-        invalid_sales = df["net_sales"].isna().sum()
-        if invalid_sales:
-            logger.warning(f"Found {invalid_sales} records with invalid net_sales values")
-            st.warning(f"Found {invalid_sales} records with invalid sales values")
-        
-        df["year"] = pd.to_numeric(df["year"], errors='coerce')
-        invalid_years = df["year"].isna().sum()
-        if invalid_years:
-            logger.warning(f"Found {invalid_years} records with invalid year values")
-            st.warning(f"Found {invalid_years} records with invalid year values")
-        
-        return df
-        
-    except Exception as e:
-        logger.error(f"Error loading data from Supabase: {str(e)}")
-        st.error(f"Error loading data: {str(e)}")
+    """Carga todos los registros de ventas desde Supabase (sin límite)."""
+    all_data = []
+    batch_size = 1000
+    offset = 0
+
+    while True:
+        response = (
+            supabase.table("ventas")
+            .select("*")
+            .range(offset, offset + batch_size - 1)
+            .execute()
+        )
+        if not response.data:
+            break
+        all_data.extend(response.data)
+        offset += batch_size
+
+    df = pd.DataFrame(all_data)
+    if df.empty:
         return pd.DataFrame(columns=["client_code", "client_name", "client_code_norm", "net_sales", "year"])
+
+    df["net_sales"] = df["net_sales"].astype(float)
+    df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
+    return df
 
 def filtrar_datos(df, year, excluir_clientes, rangos_seleccionados):
     """Filtra los datos por año, exclusión de clientes y rango."""
@@ -102,8 +83,14 @@ if df.empty:
     st.warning("No se encontraron datos en la base de datos 'ventas'.")
     st.stop()
 
+# Clasificar y asegurar tipos
 df["rango_facturacion"] = df["net_sales"].apply(clasificar_rango)
-años = sorted(df["year"].unique())
+años = sorted(df["year"].dropna().unique())
+
+# Debug temporal para verificar años cargados
+# st.sidebar.markdown("### 🧭 Diagnóstico")
+# st.sidebar.write("**Años detectados:**", list(años))
+# st.sidebar.write("**Total registros:**", len(df))
 
 # -------------------------------
 # INTERFAZ DE PESTAÑAS
@@ -130,8 +117,7 @@ with tab1:
     )
 
     # Filtrado
-    df_filtrado = df.copy()
-    df_filtrado = filtrar_datos(df_filtrado, año_seleccionado, excluir_clientes, rangos_seleccionados)
+    df_filtrado = filtrar_datos(df, año_seleccionado, excluir_clientes, rangos_seleccionados)
 
     ventas_por_cliente = (
         df_filtrado.groupby(["client_code_norm", "client_name", "rango_facturacion"], as_index=False)["net_sales"]
@@ -163,7 +149,6 @@ with tab1:
         .sort_values("total_ventas", ascending=False)
     )
 
-    # Gráfico Altair con colores personalizados
     chart_rangos = (
         alt.Chart(resumen_rangos)
         .mark_bar()
@@ -228,17 +213,14 @@ with tab2:
 
     col_a, col_b = st.columns(2)
     with col_a:
-        año_1 = st.selectbox("Año inicial", años, index=len(años)-2 if len(años) > 1 else 0)
+        año_1 = st.selectbox("Año inicial", años, index=max(0, len(años)-2))
     with col_b:
         año_2 = st.selectbox("Año comparado", años, index=len(años)-1)
 
     modo_comparacion = st.radio("Modo de comparación", ["Totales", "Por cliente"], horizontal=True)
 
     if modo_comparacion == "Totales":
-        # Ventas totales por año
-        ventas_totales = (
-            df.groupby("year")["net_sales"].sum().reset_index().sort_values("year")
-        )
+        ventas_totales = df.groupby("year")["net_sales"].sum().reset_index().sort_values("year")
 
         st.subheader("💰 Ventas Totales por Año")
         st.bar_chart(ventas_totales, x="year", y="net_sales", use_container_width=True)
@@ -281,7 +263,6 @@ with tab2:
         st.altair_chart(chart_rangos_comp, use_container_width=True)
 
     else:
-        # Comparación por cliente
         df_1 = df[df["year"] == año_1].groupby(["client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
         df_2 = df[df["year"] == año_2].groupby(["client_code_norm", "client_name"], as_index=False)["net_sales"].sum()
 
