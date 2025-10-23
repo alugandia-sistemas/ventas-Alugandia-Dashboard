@@ -1,3 +1,4 @@
+from asyncio import sleep
 import streamlit as st
 from supabase_client import get_supabase_client
 from utils import redirect
@@ -38,6 +39,7 @@ def register(email: str, password: str):
     try:
         supabase.auth.sign_up({"email": email, "password": password})
         supabase.table("pending_users").insert({"email": email, "approved": False}).execute()
+        sleep(5)
         st.success("✅ Registro completado. Espera la aprobación del administrador.")
         redirect("Home.py")
     except Exception as e:

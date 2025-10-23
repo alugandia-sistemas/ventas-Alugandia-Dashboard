@@ -235,9 +235,10 @@ with tab1:
 # ============================================================
 # 🔵 TAB 2 – COMPARATIVA ANUAL
 # ============================================================
-# with tab2:
-#     st.title("📈 Comparativa de Ventas entre Años")
-#     st.markdown("Compara ventas totales o por cliente entre dos años distintos, con análisis por rango de facturación.")
+with tab2:
+    st.title("📈 Comparativa de Ventas entre Años")
+    st.markdown("Compara ventas totales o por cliente entre dos años distintos, con análisis por rango de facturación.")
+    st.text("Esta funcionalidad está en desarrollo y se habilitará próximamente.")
 
 #     col_a, col_b = st.columns(2)
 #     with col_a:
