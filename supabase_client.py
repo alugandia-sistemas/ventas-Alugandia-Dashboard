@@ -10,12 +10,14 @@ def get_supabase_client() -> Client:
         st.session_state["_dotenv_loaded"] = True
 
     # Prioridad: st.secrets -> variables de entorno -> .env (cargado arriba)
-    url = st.secrets.get("SUPABASE_URL") if hasattr(st, "secrets") else None
-    key = st.secrets.get("SUPABASE_KEY") if hasattr(st, "secrets") else None
+    # url = st.secrets.get("SUPABASE_URL") if hasattr(st, "secrets") else None
+    # key = st.secrets.get("SUPABASE_KEY") if hasattr(st, "secrets") else None
 
-    url = url or os.getenv("SUPABASE_URL")
-    key = key or os.getenv("SUPABASE_KEY")
-
+    # url = url or os.getenv("SUPABASE_URL")
+    # key = key or os.getenv("SUPABASE_KEY")
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")
+    
     if not url or not key:
         st.error(
             "⚠️ Faltan credenciales de Supabase. Define `SUPABASE_URL` y `SUPABASE_KEY` "
