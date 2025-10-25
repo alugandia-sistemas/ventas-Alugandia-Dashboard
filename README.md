@@ -3,6 +3,16 @@
 
 ## Ejecución local
 
+UPDATE: 
+En Windows 11, puede haber problemas de permisos.
+```bash
+Set-ExecutionPolicy Unrestricted -Scope Process
+```
+Y al finalizar:
+```bash
+Set-ExecutionPolicy Default -Scope Process
+```
+
 0. Instalar environment
 ```bash
 python -m venv /path/to/new/virtual/environment
@@ -19,7 +29,7 @@ Ejecutar env en PowerhSell
    ```
 2. Inicia el dashboard:
    ```bash
-   streamlit run app.py
+   streamlit run Home.py
    ```
 3. Se abrirá en tu navegador en `http://localhost:8501`.
 
